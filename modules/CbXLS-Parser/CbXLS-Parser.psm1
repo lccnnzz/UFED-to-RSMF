@@ -12,7 +12,7 @@ function Get-EndDate{
         [DateTime]$beginDate,
 
         [Parameter()]
-        [ValidateSet('None', 'Week', 'Month')]
+        [ValidateSet('None', 'Day', 'Week', 'Month')]
         [String]$TimePeriod = 'None'
     )
 
@@ -25,6 +25,9 @@ function Get-EndDate{
         }
         'Month'{
             return (Get-Date $beginDate.AddMonths(1) -Day 1 -Hour 23 -Minute 59 -Second 59).AddDays(-1)
+        }
+        'Day'{
+            return (Get-Date $beginDate -Hour 23 -Minute 59 -Second 59)
         }
     }
 }
