@@ -29,3 +29,31 @@ class ProgressHelper{
         }
     }
 }
+
+class StatsHelper{
+    [System.Collections.ArrayList] $Counters = @()
+    [void]Add([String]$Name){
+        $counter = [PSCustomObject]@{
+            "name"        = $Name;
+            "count" = 0
+        }
+        $this.Counters.Add($counter)
+    }
+
+    [void]Update([String]$Counter, [int]$ItemsToAdd){
+        $counterToUpdate = $this.Counters | Where-Object {$_.name -eq $Counter}
+        $counterToUpdate.count += $ItemsToAdd
+    }
+
+    [void]Increment([String]$Counter){
+        Update $Counter 1
+    }
+
+    [void]GetCount([String]$Counter){
+        ($this.Counters | Where-Object {$_.name -eq $Counter}).count
+    }
+    [System.Collections.ArrayList]GetShats(){
+        return $this.Counters 
+    }
+
+}

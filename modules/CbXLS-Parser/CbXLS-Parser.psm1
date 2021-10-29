@@ -2,6 +2,7 @@
 # Modules
 #========================================================
 Import-Module -Name .\modules\CbXLS-ParsingLib -DisableNameChecking
+Import-Module -Name .\modules\Utils -DisableNameChecking
 
 #========================================================
 # Functions
@@ -37,14 +38,13 @@ function Parse-Chat{
         [Parameter(Mandatory)] [System.Collections.ArrayList]$EventRows,
         [Parameter(Mandatory)] $FieldNameCols,
         [Parameter(Mandatory)] $AttachmentCols,
-        [Parameter()]
-        [ValidateSet('None', 'Week', 'Month')]
-        [String]$GroupBy = 'None',
+        [Parameter()] $AttachmentDir,
+        [Parameter()] $MaxMessagesPerChat = 9999,
+        [Parameter()] [ValidateSet('None', 'Day', 'Week', 'Month')] [String]$GroupBy = 'None',
         [Parameter()] $CustodianID = '',
-        [Parameter()] [int]$MaxMessagesPerChat = 9999,
         [Parameter()] [ref]$ProgressHelper
     )
-    
+
     $Participants  = New-Object Collections.Generic.List[PSCustomObject]
     $Conversations = New-Object Collections.Generic.List[PSCustomObject]
     $Events        = New-Object Collections.Generic.List[PSCustomObject]
@@ -54,7 +54,7 @@ function Parse-Chat{
     $FirstRow = $($EventRows | Select-Object -First 1)
 
     # Get the first event object
-    $FirstEvent = Get-Event -EventRow $FirstRow -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -CustodianID $CustodianID
+    $FirstEvent = Get-Event -EventRow $FirstRow -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -CustodianID $CustodianID -AttachmentDir $AttachmentDir
 
     # Add the first event to Events list
     [void] $Events.Add($FirstEvent)
@@ -81,15 +81,17 @@ function Parse-Chat{
     $conversation = Get-Conversation -EventRow $FirstRow -FieldCols $FieldNameCols -Participants $Participants
     [void] $Conversations.Add($conversation)
 
-    $beginDate = [DateTime] $FirstEvent.timestamp
-    $endDate   = [DateTime]$(Get-EndDate -beginDate $beginDate -Timeperiod $GroupBy)
+    $beginDate = $FirstEvent.timestamp
+    $endDate   = $(Get-EndDate -beginDate $beginDate -Timeperiod $GroupBy)
+    
     $messageCounter = 1
-    $EventGroupN     = 1
+    $EventGroupN    = 1
 
     # Iterate event rows, skipping the first row
     foreach ($row in ($EventRows | Select-Object -Skip 1)){
         $Event = Get-Event -EventRow $row -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -CustodianID $CustodianID
-        if (([datetime]$Event.timestamp -gt $endDate) -or ($messageCounter -gt $MaxMessagesPerChat) ){
+        <#-or ($messageCounter -ge  $MaxMessagesPerChat#>
+        if (([datetime]$Event.timestamp -gt $endDate)) {
             $EventGroup = [PSCustomObject]@{
                 "groupNumber"   = $EventGroupN
                 "participants"  = $Participants;
@@ -104,7 +106,6 @@ function Parse-Chat{
 
             # Update startTime and endTime
             $beginDate  = [DateTime]$Event.timestamp
-            $endDate    = [DateTime](Get-EndDate -beginDate $beginDate -TimePeriod 'Week')
             $messageCounter = 0
         }
 

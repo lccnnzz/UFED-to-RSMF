@@ -1,5 +1,11 @@
-# Function to Parse XLSX Output
+#========================================================
+# Modules
+#========================================================
+Import-Module -Name .\modules\Utils -DisableNameChecking
 
+#========================================================
+# Functions
+#========================================================
 function Get-HeaderRow{
     param(
         [Parameter(Mandatory)] $Worksheet,
@@ -135,23 +141,27 @@ function Get-SenderID{
 function Get-Attachments{
     param(
         [Parameter(Mandatory)] $EventRow,
+        [Parameter()] $AttachmentDir,
         [Parameter(Mandatory)] [int[]]$FieldCols
     )
     $attachments = New-Object Collections.Generic.List[PSCustomObject]
-
     foreach ($column in $FieldCols){
-        $id = $EventRow.Columns[$column].Value2
-        if ($id -ne ""){
-            $attachment = [PSCustomObject]@{
-                "id"      = $id
-                "display" = $id
-                "size"    = 100
+        $cell = $EventRow.Columns[$column]
+        if ($cell.Value2 -ne ""){
+            foreach ($hlink in $cell.Hyperlinks){
+                $address = Join-Path -Path $AttachmentDir -ChildPath $hlink.Address
+                $attachment = [PSCustomObject]@{
+                    "id"      = $hlink.Name
+                    "display" = $hlink.Name
+                    "size"    = (Get-Item $address).Length
+                }
+            [void] $attachments.add($attachment)
             }
-        [void] $attachments.add($attachment)
         }
     }
     return $attachments
 }
+
 
 function Get-Conversation{
     param(
@@ -172,25 +182,18 @@ function Get-Conversation{
     return $conversation
 }
 
-function Format-Timestamp{
-    param(
-        [Parameter(Mandatory)] $Timestamp
-    )
-    $regexUTC       = [Regex]::new("\(UTC[+|-][0-12]\)")
-    $match          = [datetime]($timestamp.Replace($regexUTC.Match($timestamp).Value, ""))
-    $ISOTimestamp   = Get-Date $match -Format "yyyy-MM-ddTHH:mm:ss"
-    return $ISOTimestamp
-}
-
 function Get-Event{
     param(
         [Parameter(Mandatory)] $eventRow,
         [Parameter(Mandatory)] $FieldCols,
         [Parameter(Mandatory)] $AttachmentCols,
+        [Parameter()] $AttachmentDir,
         [Parameter()] $CustodianID = ''
+
     )
     $attachments = New-Object Collections.Generic.List[PSCustomObject]
-    
+    $custom      = New-Object Collections.Generic.List[PSCustomObject]
+
     $chatN     = [string]($eventRow.Columns[$FieldCols["Chat #"]].Value2)
     $messageN  = [string]($eventRow.Columns[$FieldCols["Instant Message #"]].Value2)
     $id        = ($chatN.PadLeft(3,'0'), $messageN.PadLeft(5,'0')) -join "-"
@@ -204,12 +207,16 @@ function Get-Event{
     $deleted   = ($eventRow.Columns[$FieldCols["Deleted - Instant Message"]] -ne "") ? $false : $true
     
     #Note: uses foreach instead of assignment to always return the list (an never $null)
-    foreach ($attachment in (Get-Attachments -EventRow $eventRow -FieldCols $AttachmentCols)){
+    foreach ($attachment in (Get-Attachments -EventRow $eventRow -FieldCols $AttachmentCols -AttachmentDir $AttachmentDir)){
         [void] $attachments.Add($attachment)
-    } 
+    }
+    $eventhash = [PSCustomObject]@{
+        "name" = "eventHash"
+        "value" = ConcatHash -Values $sender, $timestamp, $body -Algorithm 'MD5'
+    }
+    [void] $custom.Add($eventhash)
     
     $event = [PSCustomObject]@{
-
         "conversation" = $chatN;
         "id"           = $id;
         "parent"       = $parent;
@@ -220,6 +227,7 @@ function Get-Event{
         "timestamp"    = $timestamp;
         "deleted"      = $deleted;
         "attachments"  = $attachments
+        "custom"       = $custom
     }
     return $event
 }

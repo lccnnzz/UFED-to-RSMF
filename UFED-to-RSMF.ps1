@@ -24,12 +24,12 @@
         This parameter is optional.
 
     .NOTES
-        Version: 0.2
+        Version: 0.5
         Author: Luca Cannizzo
         Email: luca.cannizzo@pm.com
 #>
 
-Using  module .\modules\CLIProgressBarHelper
+Using  module .\modules\Helpers
 
 #========================================================
 # Parameters
@@ -50,13 +50,15 @@ param(
     })]
     [System.IO.FileInfo]$OutputDir,
 
+    [Parameter()]$AttachmentDir = (Get-Item $InputFile).DirectoryName,
+
     [Parameter()]
     [ValidateSet('None', 'Day', 'Week', 'Month')]
     [String] $GroupMessagesBy = 'Week',
 
     [Parameter()]
-    [ValidateRange(1, 9999)]
-    [int] $MaxMessagesPerFile = 9999,
+    #[ValidateRange(1, 9999)]
+    [Int32]$MaxMessagesPerFile = 9999,
 
     [Parameter()]
     [String]$CustodianID
@@ -118,7 +120,6 @@ $global:Helper.Show()
 
 #$Manifests  = [System.Collections.ArrayList]@()
 
-$stime = Get-Date
 foreach ($chat in ($ChatEventsCount.GetEnumerator()| Sort key)){
     $beginRow = $Sheet.UsedRange.Columns[$ChatNCol].Find([string]$chat.key).Row
     $endRow   = $beginRow + $chat.Value -1
@@ -126,10 +127,9 @@ foreach ($chat in ($ChatEventsCount.GetEnumerator()| Sort key)){
     $evtCollectID = ($(Get-Item $InputFile).Basename, ([String]$chat.key).padleft(3,'0')) -join '_'
 
     $EventRows    = Get-Rows -Worksheet $Sheet -beginRow $beginRow -endRow $endRow
-    $EventsGroups = Parse-Chat -EventRows $EventRows -FieldNameCols $FieldNameCol -AttachmentCols $AttachmentCols -CustodianID $CustodianID -GroupBy $GroupMessagesBy -MaxMessagesPerChat $MaxMessagesPerChat -ProgressHelper ([ref] $global:Helper)
+    $EventsGroups = Parse-Chat -EventRows $EventRows -FieldNameCols $FieldNameCol -AttachmentCols $AttachmentCols -CustodianID $CustodianID -GroupBy $GroupMessagesBy -MaxMessagesPerChat $MaxMessagesPerChat -ProgressHelper ([ref] $global:Helper) -AttachmentDir $AttachmentDir
     
     foreach ($group in $EventsGroups){
-
         $manifest = New-RSMFManifest -conversationList $group.conversations -participantList $group.participants -eventList $group.events -eventCollectionId $evtCollectID
         $outputFile = New-OutFilePath -OutputRootDir $OutputDir -InputFileName $InputFile -ConversationN $chat.key -EventGroupN $group.groupNumber
         Save-RSMFManifest -ManifestJSON $manifest -OutputFilePath $outputFile
@@ -137,11 +137,6 @@ foreach ($chat in ($ChatEventsCount.GetEnumerator()| Sort key)){
     }
     $global:Helper.Update(1, $EventRows.Count)
 }
-
-$etime = Get-Date
-$elapsedTime = $etime-$stime
-Write-Host "Time: $($elapsedtime.minutes) minute(s) $($elapsedtime.seconds) second(s))"
-
 $Workbook.Close($False)
 $Excel.Quit()
 [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Excel)
