@@ -39,7 +39,7 @@ function Parse-Chat{
         [Parameter(Mandatory)] $FieldNameCols,
         [Parameter(Mandatory)] $AttachmentCols,
         [Parameter()] $AttachmentDir,
-        [Parameter()] $MaxMessagesPerChat = 9999,
+        [Parameter(Mandatory)] $MaxMessagesPerChat,
         [Parameter()] [ValidateSet('None', 'Day', 'Week', 'Month')] [String]$GroupBy = 'None',
         [Parameter()] $CustodianID = '',
         [Parameter()] [ref]$ProgressHelper
@@ -50,17 +50,20 @@ function Parse-Chat{
     $Events        = New-Object Collections.Generic.List[PSCustomObject]
     $EventsGroups  = [System.Collections.ArrayList]@()
         
-    #Get first row in the range
+    # Get first row in the range
     $FirstRow = $($EventRows | Select-Object -First 1)
 
+    # Get user pattern to pass to Get-Event
+    $UserPattern = Get-UserPattern -EventRow $FirstRow -SourceCol $FieldNameCols["Source"]
+    $ChatIcon    = Get-ChatIcon -EventRow $FirstRow -SourceCol $FieldNameCols["Source"]
+
     # Get the first event object
-    $FirstEvent = Get-Event -EventRow $FirstRow -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -CustodianID $CustodianID -AttachmentDir $AttachmentDir
+    $FirstEvent = Get-Event -EventRow $FirstRow -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -UserPattern $UserPattern -CustodianID $CustodianID -AttachmentDir $AttachmentDir
 
     # Add the first event to Events list
     [void] $Events.Add($FirstEvent)
     
-    # Update the progress bar
-    # Add new task to helper
+    # Update the progress bar, adding new task to helper
     $taskID   = [int]$FirstEvent.conversation + 100
     $parentID = 1
     $activity = "Chat # $($FirstEvent.conversation)"
@@ -75,23 +78,22 @@ function Parse-Chat{
     }
     
     # Get participant list from the first event
-    $Participants = Get-Participants -EventRow $firstRow -ParticipantsCol $FieldNameCols["Participants"]
+    $Participants = Get-Participants -EventRow $firstRow -ParticipantsCol $FieldNameCols["Participants"] -UserPattern $UserPattern
 
     # Get conversation info from the first event
-    $conversation = Get-Conversation -EventRow $FirstRow -FieldCols $FieldNameCols -Participants $Participants
+    $conversation = Get-Conversation -EventRow $FirstRow -FieldCols $FieldNameCols -Participants $Participants -Icon $ChatIcon
     [void] $Conversations.Add($conversation)
 
     $beginDate = $FirstEvent.timestamp
     $endDate   = $(Get-EndDate -beginDate $beginDate -Timeperiod $GroupBy)
-    
-    $messageCounter = 1
+
+    [int] $messageCounter = 1
     $EventGroupN    = 1
 
     # Iterate event rows, skipping the first row
     foreach ($row in ($EventRows | Select-Object -Skip 1)){
-        $Event = Get-Event -EventRow $row -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -CustodianID $CustodianID
-        <#-or ($messageCounter -ge  $MaxMessagesPerChat#>
-        if (([datetime]$Event.timestamp -gt $endDate)) {
+        $Event = Get-Event -EventRow $row -FieldCols $FieldNameCols -AttachmentCols $AttachmentCols -UserPattern $UserPattern -CustodianID $CustodianID 
+        if (([datetime]$Event.timestamp -gt $endDate) -or ($messageCounter -gt  $MaxMessagesPerChat)){
             $EventGroup = [PSCustomObject]@{
                 "groupNumber"   = $EventGroupN
                 "participants"  = $Participants;
@@ -106,7 +108,7 @@ function Parse-Chat{
 
             # Update startTime and endTime
             $beginDate  = [DateTime]$Event.timestamp
-            $messageCounter = 0
+            $messageCounter = 1
         }
 
         # Add current event to Events list

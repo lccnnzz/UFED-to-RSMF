@@ -2,7 +2,7 @@
 # Modules
 #========================================================
 Import-Module -Name .\modules\Utils -DisableNameChecking
-
+$platforms = Import-PowerShellDataFile .\Platforms.psd1
 #========================================================
 # Functions
 #========================================================
@@ -94,17 +94,45 @@ function Get-ChatEventsCount{
     return $ChatEvents 
 }
 
+function Get-UserPattern{
+    param(
+        [Parameter(Mandatory)] $EventRow,
+        [Parameter(Mandatory)] $SourceCol
+    )
+    $platform = $EventRow.Columns[$SourceCol].Value2
+    if ($Platforms.containsKey($platform)){
+        return $Platforms[$platform].accountPattern
+    }
+    else{
+        return $Platforms['Generic'].accountPattern
+    }
+}
+
+function Get-ChatIcon{
+    param(
+        [Parameter(Mandatory)] $EventRow,
+        [Parameter(Mandatory)] $SourceCol
+    )
+    $platform = $EventRow.Columns[$SourceCol].Value2
+    if ($Platforms.containsKey($platform)){
+        return $Platforms[$platform].icon
+    }
+    else{
+        return $Platforms['Generic'].icon
+    }
+}
+
 function Get-Participants{
     param(
         [Parameter(Mandatory)] $eventRow,
         [Parameter(Mandatory)] [int]$ParticipantsCol,
-        [Parameter()] [String]$pattern = "[0-9]+@s.whatsapp.net"
+        [Parameter(Mandatory)] $UserPattern
     )
     $id_pattern   = [Regex]::new($pattern)
     $participants = New-Object Collections.Generic.List[PSCustomObject]
     
     foreach ($p in $eventRow.Columns[$ParticipantsCol].Value2.split("`r`n")){
-        if ($p | Select-String -Pattern $id_pattern){
+        if ($p | Select-String -Pattern $UserPattern){
             $id, $display   = $p.split(" ", 2)
             $custom = New-Object Collections.Generic.List[PSCustomObject]
             $hash = [PSCustomObject]@{
@@ -128,7 +156,7 @@ function Get-Participants{
 function Get-SenderID{
     param(
         [Parameter(Mandatory)] $From,
-        [Parameter()] [String]$pattern = "[0-9]+@s.whatsapp.net"
+        [Parameter(Mandatory)] [String]$pattern
     )
 
     $SenderIdRegex = [regex]::new($pattern)
@@ -162,21 +190,29 @@ function Get-Attachments{
     return $attachments
 }
 
-
 function Get-Conversation{
     param(
         [Parameter(Mandatory)] $EventRow,
         [Parameter(Mandatory)] $FieldCols,
-        [Parameter(Mandatory)] $Participants
+        [Parameter(Mandatory)] $Participants,
+        [Parameter(Mandatory)] $Icon
     )
+
+    $source = $eventRow.Columns[$FieldCols["Source"]].Value2
+    foreach ($key in $Platforms.keys){ 
+        if ($source -match $key){
+            $platform = $key
+            break
+        }
+    }
 
     $conversation = [PSCustomObject]@{
         "id"           = $eventRow.Columns[$FieldCols["Chat #"]].Value2
         "display"      = $eventRow.Columns[$FieldCols["Name"]].Value2
-        "platform"     = $eventRow.Columns[$FieldCols["Source"]].Value2
+        "platform"     = $platform
         "type"         = ($eventRow.Columns[$FieldCols["Name"]].Value2 -eq "") ? "direct" : "channel"
+        "icon"         = $Icon
         "participants" = $Participants.ID
-
 
     }
     return $conversation
@@ -187,6 +223,7 @@ function Get-Event{
         [Parameter(Mandatory)] $eventRow,
         [Parameter(Mandatory)] $FieldCols,
         [Parameter(Mandatory)] $AttachmentCols,
+        [Parameter(Mandatory)] $UserPattern,
         [Parameter()] $AttachmentDir,
         [Parameter()] $CustodianID = ''
 
@@ -194,17 +231,20 @@ function Get-Event{
     $attachments = New-Object Collections.Generic.List[PSCustomObject]
     $custom      = New-Object Collections.Generic.List[PSCustomObject]
 
-    $chatN     = [string]($eventRow.Columns[$FieldCols["Chat #"]].Value2)
-    $messageN  = [string]($eventRow.Columns[$FieldCols["Instant Message #"]].Value2)
-    $id        = ($chatN.PadLeft(3,'0'), $messageN.PadLeft(5,'0')) -join "-"
-    $parent    = ($chatN.PadLeft(3,'0'), '1'.PadLeft(5,'0')) -join "-"
-    $body      = $eventRow.Columns[$FieldCols["Body"]].Value2;
-    $from      = $eventRow.Columns[$FieldCols["From"]].Value2;
-    $sender    = Get-SenderID -From $from;
-    $direction = switch($CustodianID) {"" {""} $sender {"outgoing"} default {"incoming"}}
-    $type      = ($sender -match "System") ? "disclaimer" : "message"
-    $timestamp = Format-Timestamp($($eventRow.Columns[$FieldCols["Timestamp: Time"]].Value2))
-    $deleted   = ($eventRow.Columns[$FieldCols["Deleted - Instant Message"]] -ne "") ? $false : $true
+    $chatN          = [string]($eventRow.Columns[$FieldCols["Chat #"]].Value2)
+    $messageN       = [string]($eventRow.Columns[$FieldCols["Instant Message #"]].Value2)
+    $id             = ($chatN.PadLeft(3,'0'), $messageN.PadLeft(5,'0')) -join "-"
+    $parent         = ($chatN.PadLeft(3,'0'), '1'.PadLeft(5,'0')) -join "-"
+    $body           = $eventRow.Columns[$FieldCols["Body"]].Value2;
+    $from           = $eventRow.Columns[$FieldCols["From"]].Value2;
+    $sender         = Get-SenderID -From $from -Pattern $UserPattern;
+    $status         = $eventRow.Columns[$FieldCols["Status"]].Value2
+    $direction      = ($status -match "Sent") ? "outgoing" : "incoming"
+    $starredMessage = $eventRow.Columns[$FieldCols["Starred Message"]].Value2
+    $importance     = ($status -match "Yes") ? "high" : "normal"
+    $type           = ($sender -match "System") ? "disclaimer" : "message"
+    $timestamp      = Format-Timestamp($($eventRow.Columns[$FieldCols["Timestamp: Time"]].Value2))
+    $deleted        = ($eventRow.Columns[$FieldCols["Deleted - Instant Message"]] -ne "") ? $false : $true
     
     #Note: uses foreach instead of assignment to always return the list (an never $null)
     foreach ($attachment in (Get-Attachments -EventRow $eventRow -FieldCols $AttachmentCols -AttachmentDir $AttachmentDir)){
@@ -220,13 +260,14 @@ function Get-Event{
         "conversation" = $chatN;
         "id"           = $id;
         "parent"       = $parent;
-        "body"         = $body
+        "body"         = $body;
         "participant"  = $sender;
         "direction"    = $direction;
         "type"         = $type;
         "timestamp"    = $timestamp;
         "deleted"      = $deleted;
-        "attachments"  = $attachments
+        "importance"   = $importance;
+        "attachments"  = $attachments;
         "custom"       = $custom
     }
     return $event

@@ -19,12 +19,8 @@
         Specifies how many messages a single rsmf_manifest can contain. 
         The default value is 9999. The maximum value is 9999.
 
-    .PARAMETER CustodianID 
-        Specifies the ID of custodian in the message system (e.g. 000000000000@s.whatsapp.net) in order to identify the direction of events (incoming/outgoing)
-        This parameter is optional.
-
     .NOTES
-        Version: 0.5
+        Version: 0.6
         Author: Luca Cannizzo
         Email: luca.cannizzo@pm.com
 #>
@@ -54,14 +50,10 @@ param(
 
     [Parameter()]
     [ValidateSet('None', 'Day', 'Week', 'Month')]
-    [String] $GroupMessagesBy = 'Week',
+    [String] $GroupMessagesBy = 'None',
 
     [Parameter()]
-    #[ValidateRange(1, 9999)]
-    [Int32]$MaxMessagesPerFile = 9999,
-
-    [Parameter()]
-    [String]$CustodianID
+    [Int32]$MaxMessagesPerFile = 9999
 )
 
 #========================================================
@@ -74,6 +66,7 @@ Import-Module -Name .\modules\CbXLS-Parser -DisableNameChecking
 #========================================================
 # Functions
 #========================================================
+
 #========================================================
 # Code
 #========================================================
@@ -97,6 +90,8 @@ $FieldNameList =
     "Name",
     "From",
     "Source",
+    "Status",
+    "Starred Message",
     "Deleted - Instant Message",
     "Timestamp: Time"
 
@@ -127,7 +122,7 @@ foreach ($chat in ($ChatEventsCount.GetEnumerator()| Sort key)){
     $evtCollectID = ($(Get-Item $InputFile).Basename, ([String]$chat.key).padleft(3,'0')) -join '_'
 
     $EventRows    = Get-Rows -Worksheet $Sheet -beginRow $beginRow -endRow $endRow
-    $EventsGroups = Parse-Chat -EventRows $EventRows -FieldNameCols $FieldNameCol -AttachmentCols $AttachmentCols -CustodianID $CustodianID -GroupBy $GroupMessagesBy -MaxMessagesPerChat $MaxMessagesPerChat -ProgressHelper ([ref] $global:Helper) -AttachmentDir $AttachmentDir
+    $EventsGroups = Parse-Chat -EventRows $EventRows -FieldNameCols $FieldNameCol -AttachmentCols $AttachmentCols -CustodianID $CustodianID -GroupBy $GroupMessagesBy -MaxMessagesPerChat $MaxMessagesPerFile -ProgressHelper ([ref] $global:Helper) -AttachmentDir $AttachmentDir
     
     foreach ($group in $EventsGroups){
         $manifest = New-RSMFManifest -conversationList $group.conversations -participantList $group.participants -eventList $group.events -eventCollectionId $evtCollectID
